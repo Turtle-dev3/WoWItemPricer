@@ -1,31 +1,59 @@
 name: Track WoW prices
+
 on:
   schedule:
-    - cron: "0 10 * * *"   # 12:00 Denmark summer / 11:00 winter (UTC, no DST)
-    - cron: "0 18 * * *" 
+    - cron: "0 10 * * *"   # ~12:00 Denmark (summer)
+    - cron: "0 18 * * *"   # ~20:00 Denmark (summer)
   workflow_dispatch:
+
 permissions:
   contents: write
+
 jobs:
   track:
     runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
     steps:
       - uses: actions/checkout@v5
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
+
       - run: pip install -r requirements.txt
+
       - name: Run tracker
         env:
           BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
           BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
         run: |
+          mkdir -p data charts
           ITEMS=$(grep -vE '^\s*(#|$)' items.txt | tr '\n' ' ')
+          echo "Tracking: $ITEMS"
           python main.py $ITEMS --region eu --days 7
+
+      - name: Post charts to Discord
+        if: ${{ env.DISCORD_WEBHOOK_URL != '' }}
+        run: |
+          shopt -s nullglob
+          files=(charts/*.png)
+          [ ${#files[@]} -eq 0 ] && { echo "No charts to post."; exit 0; }
+          args=()
+          i=0
+          for f in "${files[@]}"; do
+            args+=( -F "files[$i]=@$f" )
+            i=$((i+1))
+          done
+          curl -sf \
+            -F "payload_json={\"content\":\"WoW commodity prices - $(date -u +'%Y-%m-%d %H:%M UTC')\"}" \
+            "${args[@]}" \
+            "$DISCORD_WEBHOOK_URL"
+
       - name: Commit data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/ charts/
+          git add data charts
           git diff --staged --quiet || (git commit -m "data: snapshot $(date -u +'%Y-%m-%d %H:%M UTC')" && git push)
