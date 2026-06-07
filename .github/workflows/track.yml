@@ -2,6 +2,7 @@ name: Track WoW prices
 on:
   schedule:
     - cron: "0 10 * * *"   # 12:00 Denmark summer / 11:00 winter (UTC, no DST)
+    - cron: "0 18 * * *" 
   workflow_dispatch:
 permissions:
   contents: write
