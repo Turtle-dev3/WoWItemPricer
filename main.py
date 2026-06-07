@@ -41,6 +41,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib.ticker import FuncFormatter
 
 OAUTH_TOKEN_URL = "https://oauth.battle.net/token"
 COPPER_PER_GOLD = 10_000
@@ -55,6 +56,11 @@ CSV_FIELDS = [
     "total_quantity",
     "num_auctions",
 ]
+
+# Chart palette (dark, WoW-ish gold)
+BG, PANEL = "#0d1117", "#161b22"
+GOLD, GOLD2 = "#e6b450", "#f5d488"
+TEXT, MUTE, GRID = "#c9d1d9", "#8b949e", "#30363d"
 
 
 # --------------------------------------------------------------------------- #
@@ -172,7 +178,8 @@ def read_history(csv_path: Path, item_id: int, region: str) -> list[dict]:
 def plot_history(history: list[dict], item_id: int, item_name: str,
                  region: str, out_path: Path, days: int) -> bool:
     """Render the last `days` of price history to a PNG. Returns False if empty."""
-    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+    now = dt.datetime.now(dt.timezone.utc)
+    cutoff = now - dt.timedelta(days=days)
 
     points = []
     for r in history:
@@ -194,25 +201,50 @@ def plot_history(history: list[dict], item_id: int, item_name: str,
     prices = [p[1] for p in points]
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(times, prices, marker="o", linewidth=2, color="#c8a04b")
-    ax.fill_between(times, prices, alpha=0.12, color="#c8a04b")
+    fig, ax = plt.subplots(figsize=(11, 5.2))
+    fig.patch.set_facecolor(BG)
+    ax.set_facecolor(PANEL)
+
+    ax.plot(times, prices, color=GOLD, linewidth=2.2, zorder=3,
+            marker="o", markersize=6, markerfacecolor=GOLD2,
+            markeredgecolor=BG, markeredgewidth=1.2)
+    ax.fill_between(times, prices, 0, color=GOLD, alpha=0.10, zorder=1)
 
     # Annotate the most recent point.
-    ax.annotate(f"{prices[-1]:,.1f}g",
-                xy=(times[-1], prices[-1]),
-                xytext=(0, 10), textcoords="offset points",
-                ha="center", fontsize=9, fontweight="bold")
+    ax.annotate(f"{prices[-1]:,.0f}g", xy=(times[-1], prices[-1]),
+                xytext=(0, 12), textcoords="offset points", ha="center",
+                fontsize=10, fontweight="bold", color=GOLD2, zorder=4)
 
-    ax.set_title(f"{item_name} ({item_id}) - {region.upper()} - min unit price",
-                 fontsize=12, fontweight="bold")
-    ax.set_ylabel("Price (gold)")
-    ax.set_xlabel("Date (UTC)")
-    ax.grid(True, alpha=0.3)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-    fig.autofmt_xdate()
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=120)
+    # Pin the x-axis to the window so a single point doesn't spray across years.
+    ax.set_xlim(cutoff, now)
+    loc = mdates.AutoDateLocator(minticks=4, maxticks=8)
+    ax.xaxis.set_major_locator(loc)
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(loc))
+
+    # Pad the y-axis (handles the single-point case gracefully).
+    lo, hi = min(prices), max(prices)
+    pad = max(lo * 0.10, 1) if lo == hi else (hi - lo) * 0.15
+    ax.set_ylim(max(0, lo - pad), hi + pad)
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.0f}g"))
+
+    ax.set_title(f"{item_name}  ({item_id})  -  {region.upper()}",
+                 color=TEXT, fontsize=14, fontweight="bold", pad=14)
+    ax.tick_params(colors=MUTE, labelsize=10)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color(GRID)
+    ax.grid(True, axis="y", color=GRID, linewidth=0.8, alpha=0.6)
+    ax.set_axisbelow(True)
+
+    n = len(points)
+    fig.text(0.5, 0.015,
+             f"min unit price | {n} data point{'s' if n != 1 else ''} "
+             f"| window: last {days} day{'s' if days != 1 else ''}",
+             ha="center", color=MUTE, fontsize=8.5)
+
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
+    fig.savefig(out_path, dpi=130, facecolor=BG)
     plt.close(fig)
     return True
 
